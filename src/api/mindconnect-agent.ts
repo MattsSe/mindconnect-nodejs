@@ -457,6 +457,127 @@ export class MindConnectAgent extends AgentAuth {
         return promise;
     }
 
+        /**
+     * Uploads the file to mindsphere using multi part operations
+     *
+     * @param {string} fileName filename
+     * @param {string} description description of the file
+     * @param {string} [folderName] folder name is optional
+     * @param {string} [entityId] entityid can be used to define the asset for upload, otherwise the agent is used.
+     * @param {number} [partSize=8 * 1024 * 1024]  - default part size is 8MB
+     * @param {number} [maxSockets=3] - maxSockets for http Upload
+     * @returns {Promise<Object>}
+     *
+     * @memberOf IoT File Service
+     */
+    public UploadMultiPart(fileName: string, description: string, folderName?: string, entityId?: string, partSize: number = 8 * 1024 * 1024, maxSockets: number = 3): Promise<Object> {
+        http.globalAgent.maxSockets = maxSockets;
+        const promise = new Promise<Object>((promiseResolve, promiseReject) => {
+            (async () => {
+
+                try {
+                    await this.RenewToken();
+                    if (!this._accessToken || !this._accessToken.access_token)
+                        throw new Error("The agent doesn't have a valid access token.");
+                    const token = this._accessToken.access_token;
+
+                    if (!this._configuration.content.clientId)
+                        throw new Error("No client id in the configuration of the agent.");
+
+                    const hash = crypto.createHash("md5");
+                    const stats = fs.statSync(fileName);
+                    const totalParts = Math.ceil(stats.size / partSize);
+
+                    const shortFileName = path.basename(fileName);
+
+                    if (!entityId) {
+                        entityId = this._configuration.content.clientId;
+                    }
+
+                    const promises: Promise<void | Object>[] = [];
+                    const file = fs.createReadStream(fileName, { "highWaterMark": partSize });
+
+                    const abstractURL = folderName ? `${this._configuration.content.baseUrl}/api/iotfile/v3/files/${entityId}/${folderName}/${shortFileName}`
+                        : `${this._configuration.content.baseUrl}/api/iotfile/v3/files/${entityId}/${shortFileName}`;
+
+                    const headers = {
+                        ...this._apiHeaders,
+                        "Authorization": `Bearer ${token}`,
+                        "description": description,
+                        "timestamp": stats.ctime.toISOString(),
+                        "Content-type": "application/octet-stream"
+                    };
+
+                    file.on("open", async () => {
+                        const startURL = abstractURL + '?upload=start';
+                        const startHeaders = headers;
+
+                        if (this._configuration.urls && (<any>this._configuration.urls)[startURL]) {
+                            const eTag = (<any>this._configuration.urls)[startURL];
+                            const etagNumber = parseInt(eTag);
+                            (<any>startHeaders)["If-Match"] = etagNumber;
+                        }
+
+                        promises.push(fetch(startURL, { method: "PUT", headers: startHeaders, agent: this._proxyHttpAgent }).then(async response => {
+                            if (response.status <= 200 || response.status >= 300) {
+                                throw new Error(`${response.status} ${startURL}`);
+                            } else {
+                                if (!this._configuration.urls) {
+                                    this._configuration.urls = {};
+                                }
+                                (<any>this._configuration.urls)[startURL] = response.headers.get("eTag");
+                                await this.SaveConfig();
+                            }
+                        }));
+                    });
+
+                    let part = 1;
+                    file.on("data", async (buffer: Buffer) => {
+                        const url = abstractURL + ((part == totalParts) ? '?upload=complete' : ('?part=' + part++));
+                        const putHeaders = headers;
+
+                        if (this._configuration.urls && (<any>this._configuration.urls)[url]) {
+                            const eTag = (<any>this._configuration.urls)[url];
+                            const etagNumber = parseInt(eTag);
+                            (<any>putHeaders)["If-Match"] = etagNumber;
+                        }
+                        hash.update(buffer);
+                       
+                        promises.push(fetch(url, { method: "PUT", body: buffer, headers: putHeaders, agent: this._proxyHttpAgent }).then(async response => {
+                            if (response.status <= 200 || response.status >= 300) {
+                                throw new Error(`${response.status} ${url}`);
+                            } else {
+                                if (!this._configuration.urls) {
+                                    this._configuration.urls = {};
+                                }
+                                (<any>this._configuration.urls)[url] = response.headers.get("eTag");
+                                await this.SaveConfig();
+                            }
+                        }));
+                    });
+
+                    file.on("end", async () => {
+                        try {
+                            // wait till all uploads in a job are done.
+                            await Promise.all(promises);
+                            promiseResolve(hash.digest("hex"));
+                        }
+                        catch (err) {
+                            promiseReject(new Error("upload failed " + err));
+                        }
+                    });
+
+                    file.read();
+                } catch (error) {
+                    promiseReject(new Error("Upload failed " + error));
+                }
+
+            })();
+        });
+
+        return promise;
+    }
+    
     // Commented out: the exchange endpoint is very bad...
     // private async UploadFile(fileName: string, fileType: string, encoding?: MessageEncoding, chunkSize: number = 7 * 1024 * 1024): Promise<boolean> {
 
