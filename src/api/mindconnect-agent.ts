@@ -520,7 +520,7 @@ export class MindConnectAgent extends AgentAuth {
 
                         promises.push(fetch(startURL, { method: "PUT", headers: startHeaders, agent: this._proxyHttpAgent }).then(async response => {
                             if (response.status <= 200 || response.status >= 300) {
-                                throw new Error(`${response.status} ${startURL}`);
+                                throw new Error(`${response.status} ${response.statusText}`);
                             } else {
                                 if (!this._configuration.urls) {
                                     this._configuration.urls = {};
@@ -545,7 +545,7 @@ export class MindConnectAgent extends AgentAuth {
                        
                         promises.push(fetch(url, { method: "PUT", body: buffer, headers: putHeaders, agent: this._proxyHttpAgent }).then(async response => {
                             if (response.status <= 200 || response.status >= 300) {
-                                throw new Error(`${response.status} ${url}`);
+                                throw new Error(`${response.status} ${response.statusText}`);
                             } else {
                                 if (!this._configuration.urls) {
                                     this._configuration.urls = {};

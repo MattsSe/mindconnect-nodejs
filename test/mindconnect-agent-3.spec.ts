@@ -540,4 +540,28 @@ describe("MindConnectApi Version 3 Agent (SHARED_SECRET)", () => {
 
         logCount.should.be.gte(3);
     }));
+
+    it("should be to upload file using multipart api", mochaAsync(async () => {
+        const agent = new MindConnectAgent(sharedSecretConfig);
+
+        if (!agent.IsOnBoarded()) {
+            await agent.OnBoard();
+        }
+
+        const result = await agent.UploadMultiPart("big_file_test.pdf", "big file");
+    }));
+
+    it("should be to upload file using multipart api in 5 retries", mochaAsync(async () => {
+        const agent = new MindConnectAgent(sharedSecretConfig);
+        if (!agent.IsOnBoarded()) {
+            await agent.OnBoard();
+        }
+        let logCount = 0;
+        await retry(5, () => agent.UploadMultiPart("big_file_test.pdf", "big file"), 300,
+            () => {
+                logCount++;
+                if (logCount < 3)
+                    throw new Error("not yet");
+            });
+    }));
 });
